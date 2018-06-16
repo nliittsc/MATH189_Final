@@ -1,0 +1,729 @@
+> Projects <- read_csv("C:/Users/acros/Documents/Math 189/Datasets/Projects.csv", 
++     col_types = cols(`Project Essay` = col_skip(), 
++         `Project ID` = col_skip(), `Project Need Statement` = col_skip(), 
++         `Project Short Description` = col_skip(), 
++         `Project Title` = col_skip(), `School ID` = col_skip(), 
++         `Teacher ID` = col_skip()))
+
+
+
+ADD IN THE EXPIRATION DATE OF THE PROJECT TO OUR PROJECTDF FILE. The following code cleans up a lot of stuff and makes it so that when we add the date to the file, it approximately matches.
+
+
+```{r}
+summary(Projects)
+```
+
+```{r}
+names(Projects) <- c("TeacherProjSeq", "ProjectType", "ProjectSubject", "ProjectSubCat", "ProjectGrade", "ProjectResource", "ProjectCost", "ProjectStartDate", "ProjectExpDate", "ProjectStatus", "ProjectFundedDate" )
+summary(Projects)
+```
+
+
+```{r}
+projectdf2 <- subset(Projects, ProjectStatus != "Live")
+projectdf3 <- subset(projectdf2, ProjectResource != "NA")
+projectdf$ProjectExpDate <- projectdf3$ProjectExpDate
+```
+
+```{r}
+projectdf$FundedDate <- projectdf3$ProjectFundedDate
+```
+
+
+NOW ATTEMPT TO TIME SERIES MODEL
+```{r}
+library(ggplot2)
+library(tseries)
+library(forecast)
+```
+
+THIS GIVES US A CUMULATIVE SUM OF FUNDED PROJECTS
+```{r}
+projectdf$CumulativeFunded <- cumsum(projectdf$status)
+projectdf$MonthlyMovingAverage <- ma(projectdf$status, order = 30)
+```
+
+
+WE ATTEMPT TO MODEL DONATION AMOUNT AND FREQUENCY, AND POSSIBLY UNIQUE DONATIONS
+```{r}
+names(Donations) <- c("Donation.ID", "Donor.ID", "Optional.Donation", "Donation.Amount", "Cart.Sequence", "Donation.Recieved.Date")
+```
+
+
+```{r}
+isodate <- function (x = Sys.Date()) {
+  xday <- ISOdate(year(x), month(x), day(x), tz = tz(x))
+  dn <- 1 + (wday(x) + 5)%%7
+  nth <- xday + ddays(4 - dn)
+  jan1 <- ISOdate(year(nth), 1, 1, tz = tz(x))
+  return(sprintf("%s/%02d", format(nth, "%y"), 1 + (nth - jan1)%/%ddays(7)))
+}
+```
+
+
+REMOVES THE TIME ELEMENT FROM THE DATE
+```{r}
+library(lubridate)
+library(zoo)
+Donations$Recieve.Date <- as.Date(Donations$Donation.Recieved.Date)
+Donations$MonthYear <- format(as.Date(Donations$Recieve.Date), "%Y-%m")
+Donations$WeekYear <- isodate(Donations$Recieve.Date)
+
+```
+
+
+
+
+```{r}
+DonateAmounts <- aggregate(Donation.Amount~Recieve.Date, Donations, sum)
+DonateAmounts$Weekly.Moving.Average <- ma(DonateAmounts$Donation.Amount, order = 7)
+DonateAmounts$Monthly.Moving.Average <- ma(DonateAmounts$Donation.Amount, order = 30)
+```
+
+```{r}
+DonateWeekly <- aggregate(Donation.Amount~WeekYear, Donations, sum)
+```
+
+
+```{r}
+
+uniquetimeseries <- ts(UniqueVisit[(12:291),]$UniqueCount, frequency = 52, start = c(2013,1), end = c(2018, 19))
+autoplot(uniquetimeseries, ts.colour = "Blue")+
+  geom_line(color = "#00AFBB", size = .75, aes(colour=id))+
+  xlab("Time")+
+  geom_smooth(color = "red", se = FALSE)+
+  ylab("Number of Unique Donors/Week")+
+  ggtitle("Time Series of Unique Donors")+
+  theme_bw()+
+  theme(text = element_text(size = 16))
+  
+```
+
+
+```{r}
+DonateCount$Weekly.Moving.Average <- ma(DonateCount$Count, order = 7)
+DonateCount$Monthly.Moving.Average <- ma(DonateCount$Count, order = 30)
+```
+
+
+
+```{r}
+traints <- window(UniquevisitTS, start = c(2013,1), end = c(2018,1))
+testts <- window(UniquevisitTS, start=c(2018,2), end = c(2018,19))
+
+```
+
+```{r}
+testingforecast <- forecast(traints)
+accuracy(testingforecast, testts)
+```
+
+```{r}
+arimatest <- auto.arima(traints)
+arimafcast <- forecast(arimatest)
+accuracy(arimafcast, testts)
+```
+
+
+```{r}
+summary(arimatest)
+summary(testingforecast)
+```
+
+
+
+This forecast method uses STL + ETS(A,Ad,N)
+```{r}
+library(ggplot2)
+library(tseries)
+library(forecast)
+library(ggfortify)
+
+etsmodel <- tbats(UniquevisitTS)
+etsforecast <- forecast(etsmodel)
+autoplot(etsforecast, geom = "line", ts.colour = ("dodgerblue3"), predict.colour = "black", conf.int.fill = "red")+
+  xlab("Time")+
+  ylab("Number of Unique Donors/Week")+
+  ggtitle("Unique Donors Forecast")+
+  theme(text = element_text(size = 16))
+```
+
+
+
+```{r}
+autoplot(stl(UniquevisitTS, s.window = "periodic"))+
+  geom_line( size = .75, color = "#00AFBB",)+
+  theme_bw()+
+  theme(text = element_text(size = 16))
+```
+
+
+
+
+```{r}
+
+library(ggplot2)
+library(tseries)
+library(forecast)
+uniqueforecast <- forecast(UniquevisitTS, level = 95, h = (52 + (52-19)))
+
+library(ggfortify)
+
+autoplot(uniqueforecast, geom = "line", ts.colour = ("dodgerblue3"), predict.colour = "black", conf.int.fill = "red")+
+  xlab("Time")+
+  geom_smooth()+
+  ylab("Number of Unique Donors/Week")+
+  ggtitle("Unique Donors Forecast")+
+  theme_bw()+
+  theme(text = element_text(size = 16))
+
+```
+
+```{r}
+autoplot(resid(uniqueforecast))+
+  geom_line(color = "red", size = 0.70)+
+  geom_hline(aes(yintercept = 0))+
+   xlab("Time")+
+  ylab("Residuals of STL+ETS(A,Ad,N)")+
+  ggtitle("Residual Plot")+
+  theme_bw()+
+  theme(text = element_text(size = 14))
+```
+
+
+
+```{r}
+library(MASS)
+ggplot(UniqueVisit, aes(x = UniqueCount, y = Donation.Amount))+
+  geom_point(shape = 1, color = "Blue")+
+  stat_smooth(method = "glm", formula = y ~ x, fill = "Red", color = "Black")+
+  theme_bw()+
+  xlab("Unique Donors per Week")+
+  ylab("Money Donated/Week")+
+  scale_y_continuous(labels = comma) +
+  ggtitle("Relationship Between Donors and Donations")+
+  theme(text = element_text(size = 14))
+```
+
+
+```{r}
+library(broom)
+mod <- lm(Donation.Amount ~ UniqueCount, data = UniqueVisit)
+df <- augment(mod)
+ggplot(df, aes(x = .fitted, y = .resid)) + geom_point()
+```
+
+
+
+
+
+GGPLOT TIME SERIES OF THE DONATION AMOUNT, WEEKLY MOVING AVERAGE AND MONTHLY MOVING AVERAGE
+```{r}
+library(ggfortify)
+library(forecast)
+donationforecast <- forecast(donationtimeseries)
+autoplot(donationforecast, geom = "line", ts.colour = ("dodgerblue3"),
+         predict.color = "black", conf.int.fill = "red")+
+  xlab("Time")+
+  ylab("Donation Amount/Week")+
+  ggtitle("Forecast of Donation Amount per Week")+
+  theme(text = element_text(size=18))
+summary(donationforecast)
+```
+
+
+OKAY NOW TO ACTUALLY DO SOME TIME SERIES STUFF. THE FOLLOWING DESEASONALIZES THE TIME SERIES MODEL
+```{r}
+donation2013.2018 <- DonateAmounts[(34:1985),]
+count.ma <- ts(na.omit(donation2013.2018$Weekly.Moving.Average), frequency = 30)
+decomp <- stl(count.ma, s.window = "periodic")
+deseasonal.cnt <- seasadj(decomp)
+plot(decomp)
+```
+
+
+We perform the augmented Dickey-Fuller Test to see if our time series data is stationary or not. Note that the alternative is that the series is stationary, and the null is that it is non-stationary. The test rejects with a p-value of 0.01 on the regular data and the deseasonalized data, and so the data is stationary. We can proceed with the model. Taking the difference of the data, we see that the data oscillates around 0 with no strong trend, which impies that a difference of order 1 is sufficient and should be included in the model.
+```{r}
+adf.test(count.ma, alternative = "stationary")
+adf.test(deseasonal.cnt, alternative = "stationary")
+count.d1 = diff(deseasonal_cnt, differences = 1)
+plot(count.d1)
+```
+
+
+This plots some stuff about lags. It's hard to say exactlly what this means at the moment.
+```{r}
+Acf(count.d1, main='ACF for Differenced Series')
+Pacf(count.d1, main='PACF for Differenced Series')
+```
+
+
+We now fit an ARIMA Model
+
+
+We look at the residuals of the current model. Note that the "autocorrelation" spikes on the 7th lag, or something. This indicates that we should put p = 7 for our model.
+```{r}
+unique.arima<-auto.arima(UniquevisitTS)
+summary(unique.arima)
+tsdisplay(residuals(unique.arima), lag.max=45, main = "Model Residuals")
+```
+
+
+NAIVE MODEL RESULT
+```{r}
+library(scales)
+fcast <- forecast(unique.arima, h=52)
+plot(fcast)
+
+autoplot(fcast, geom = "line", ts.colour = ("dodgerblue3"),
+         predict.color = "black", conf.int.fill = "red")+
+  xlab("Time")+
+  ylab("Unique Donors/Week")+
+  ggtitle("Forecast of Unique Donors per Week")+
+  theme(text = element_text(size=18))
+```
+
+
+
+HERE WE WILL ATTEMPT TO REDO THE TIME SERIES IN A MORE PRECISE WAY
+
+
+First make the time series object, We have 365.25 observations per year, and we start in 2013. In order to smooth the data, we use the weekly moving average.
+```{r}
+donationtimeseries <- ts(DonateWeekly[(12:291),]$Donation.Amount, frequency = 52, start = c(2013, 1), c(2018, 19))
+plot(donationtimeseries)
+additivedecomposedts <- decompose(donationtimeseries)
+plot(additivedecomposedts)
+multidecomposedts <- decompose(donationtimeseries, type = "multiplicative")
+plot(multidecomposedts)
+```
+
+
+
+Now we will decompose with STL which stands for "seasonal times series by loess". Note the trendline and the super sharp seasonality.
+```{r}
+donation.stl <- stl(donationtimeseries, t.window = 15, s.window="periodic", robust=TRUE)
+plot(donation.stl)
+```
+
+```{r}
+library(forecast)
+donation.arima <- auto.arima(donationtimeseries)
+summary(donation.arima)
+tsdisplay(residuals(donation.arima), main = "Donation Model Residuals")
+donationarimafcast <- forecast(donation.arima, h = 52)
+
+autoplot(donationarimafcast, geom = "line", ts.colour = ("dodgerblue3"),
+         predict.color = "black", conf.int.fill = "red")+
+  xlab("Time")+
+  ylab("Donation Amount/Week")+
+  ggtitle("Forecast of Donation Amount per Week")+
+  theme(text = element_text(size=18))
+```
+
+
+
+
+```{r}
+summary(projectdata)
+```
+
+
+```{r}
+library(caret)
+set.seed(1)
+smalltraining <- sample(1:nrow(projectdata), 10000)
+smalltesting <- sample(1:nrow(projectdata[-smalltraining,]), 10000)
+
+bigtrainset <- createDataPartition(projectdata$project.status, p = 0.70, list = FALSE)
+testset <- createDataPartition(projectdata[-bigtrainset,]$project.status, p = 0.30, list = FALSE)
+summary(projectdata[bigtrainset,])
+```
+
+
+We do a small basic model, to make sure caret and the like works as expected.
+```{r}
+library(caret)
+set.seed(1)
+
+train_control <- trainControl(method = "cv", number = 5, savePredictions = "none", summaryFunction = twoClassSummary, classProbs = TRUE)
+glm.model <- train(project.status ~ project.cost + school.metro.type + school.percent.lunch +school.state + proj.type.clean + proj.time.up +project.start.date, data = projectdata, subset = bigtrainset, metric = "ROC", method = "glm", family = "binomial", trControl = train_control)
+glm.model
+summary(glm.model)
+```
+
+```{r}
+predictions <- predict(glm.model, newdata = projectdata[-bigtrainset,], response = "raw" )
+confusionMatrix(predictions, projectdata[-bigtrainset,]$project.status, positive = "Fully.Funded")
+```
+
+```{r}
+library(ggplot2)
+library(ROCR)
+probabilities <- predict(glm.model, projectdata[testset,], type = "prob")
+preddz <- prediction(probabilities$Fully.Funded, labels = projectdata[testset,]$project.status)
+rocz <- performance(preddz, "tpr", "fpr")
+plot(rocz, main = "Test Set ROC Curves for Logistic Regression", colorize = TRUE, lwd=3)
+abline(a=0, b=1, lty=2, lwd=3, col="black")
+```
+
+
+BOOSTED MODEL
+```{r}
+library(gbm)
+library(caret)
+set.seed(1)
+grid <- expand.grid(n.trees = c(500), shrinkage = c(0.1, 0.01), interaction.depth = c(6, 8), n.minobsinnode = c(10))
+train_control <- trainControl(method = "cv", number = 2, savePredictions = "none", summaryFunction = twoClassSummary, classProbs = TRUE)
+boost.model <- train(project.status ~ project.cost + school.metro.type+ school.percent.lunch + school.state + proj.type.clean + proj.time.up + week.start.date + year.start.date + project.start.date + project.resource, data = projectdata, subset = bigtrainset, method = "gbm", trControl = train_control, metric = "ROC", tuneGrid= grid)
+boost.model
+summary(boost.model)
+```
+
+```{r}
+predictions <- predict(boost.model, projectdata[testset,], type = "prob", n.trees = 500)
+confusionMatrix(predictions, projectdata[testset,]$project.status)
+
+```
+
+```{r}
+library(ggplot2)
+library(ROCR)
+predictionprobs <- predict(boost.model, projectdata[testset,], type = "prob", n.trees = 500)
+pred <- prediction(predictionprobs$Fully.Funded, labels = projectdata[testset,]$project.status)
+rocs <- performance(pred, "tpr", "fpr")
+plot(rocs, main = "Test Set ROC Curves for Gradient Boosting", colorize = TRUE, lwd=3)
+abline(a=0, b=1, lty=2, lwd=3, col="black")
+performance
+```
+
+
+```{r}
+threshold1 <- function(predict, response) {
+    perf <- ROCR::performance(ROCR::prediction(predict, response), "sens", "spec")
+    df <- data.frame(cut = perf@alpha.values[[1]], sens = perf@x.values[[1]], spec = perf@y.values[[1]])
+    df[which.max(df$sens + df$spec), "cut"]
+}
+```
+
+
+
+```{r}
+cutoffs1 <- threshold1(predictionprobs$Fully.Funded, projectdata[testset,]$project.status)
+cutoffs1
+
+cutoffs2 <- threshold1(predictionprobs2$Fully.Funded, projectdata[-bigtrainset,]$project.status)
+cutoffs2
+```
+
+```{r}
+set.seed(1)
+final_boost <- data.frame(actual = projectdata[-bigtrainset,]$project.status,
+                          predict(boost.model, newdata = projectdata[-bigtrainset,], type = "prob", n.trees = 500))
+final_boost$predict <- ifelse(final_boost$Fully.Funded > 0.5, "Fully.Funded", "Expired")
+final_boost$predict <- as.factor(final_boost$predict)
+confusionMatrix(final_boost$predict, projectdata[-bigtrainset,]$project.status, positive = "Fully.Funded")
+```
+
+
+
+```{r}
+library(caret)
+final_logistic <- data.frame(actual = projectdata[-bigtrainset,]$project.status,
+                    predict(log.ridge, newdata = projectdata[-bigtrainset,], type = "prob"))
+final_logistic$predict <- ifelse(final_logistic$Fully.Funded > 0.50, "Fully.Funded", "Expired")
+final_logistic$predict <- as.factor(final_logistic$predict)
+confusionMatrix(final_logistic$predict, projectdata[-bigtrainset,]$project.status, positive = "Fully.Funded")
+
+```
+
+
+
+RIDGE REGRESSION
+```{r}
+library(glmnet)
+library(caret)
+
+
+set.seed(1)
+
+
+grid=expand.grid(
+              .alpha=0,
+              .lambda= 2^runif(150, min = -10, 3))
+train_control <- trainControl(method = "cv", number = 5, classProbs = TRUE, summary = twoClassSummary, savePredictions = "none")
+log.ridge <- train(project.status ~ project.cost + school.metro.type + school.percent.lunch + school.state + proj.type.clean + proj.time.up + project.start.date + project.resource + project.grade, data = projectdata, subset = bigtrainset, method = "glmnet", metric = "ROC", trControl = train_control, tuneGrid = grid)
+log.ridge
+summary(log.ridge)
+varImp(log.ridge)
+```
+
+```{r}
+final_log <- data.frame(actual = data_test$project.status,
+                    predict(log.ridge, newdata = data_test, type = "prob"))
+
+```
+
+```{r}
+final_log$predict <- ifelse(final_log$Fully.Funded> 0.65
+                            , "Fully.Funded", "Expired")
+final_log$predict <- as.factor(final_log$predict)
+confusionMatrix(final_log$predict, data_test$project.status, positive = "Fully.Funded")
+```
+
+
+
+```{r}
+library(data.table)
+library(scales)
+library(dplyr)
+set.seed(1)
+data_test$predictions <- data_test$prediction$Fully.Funded
+data_test$binary <- ifelse(data_test$project.status == "Fully.Funded", 1, 0)
+cm_info <- ConfusionMatrixInfo( data = data_test, predict = "predictions", 
+                                actual = "binary", cutoff = .70 )
+cm_info$plot
+```
+
+
+
+```{r}
+library(ROCR)
+predictionprobs2 <- predict(log.ridge, projectdata[-bigtrainset,], type = "prob")
+pred2 <- prediction(predictionprobs2$Fully.Funded, labels = projectdata[-bigtrainset,]$project.status)
+rocs2 <- performance(pred2, "tpr", "fpr")
+plot(rocs2, main = "Test Set ROC Curves for Ridge Regression", colorize = TRUE, lwd=3)
+abline(a=0, b=1, lty=2, lwd=3, col="black")
+
+```
+
+```{r}
+print(performance(pred2, "auc"))
+```
+
+
+
+LASSO
+
+
+
+
+
+```{r}
+test <- model.matrix(project.status~project.grade+project.resource+project.cost+project.start.date+school.metro.type+school.percent.lunch+school.state+proj.type.clean+proj.time.up, data = data_test)
+
+predd <- predict(lasso.net, newx = test, s = lasso.net$lambda.min, type = "response")
+
+
+final_lasso <- data.frame(actual = data_test$project.status,
+                    predd)
+final_lasso$predict <- ifelse(final_lasso$X1> 0.50, "Fully.Funded", "Expired")
+final_lasso$predict <- as.factor(final_lasso$predict)
+confusionMatrix(final_lasso$predict, data_test$project.status, positive = "Fully.Funded")
+```
+
+
+
+
+MAKING SOME DENSITY PLOTS
+```{r}
+data_train <- projectdata[bigtrainset,]
+data_test <- projectdata[-bigtrainset,]
+data_train$prediction <- predict( lasso.model, newdata = projectdata[bigtrainset,], type = "prob" )
+data_test$prediction  <- predict( lasso.model, newdata = projectdata[-bigtrainset,] , type = "prob" )
+prediction <- predict(lasso.model, newdata = projectdata[-bigtrainset,], type = "raw")
+confusionMatrix(prediction, data_test$project.status, positive = "Fully.Funded")
+```
+
+```{r}
+library(ggplot2)
+library(ggthemes)
+ggplot( data_train, aes( prediction$Fully.Funded, color = as.factor(project.status) ) ) + 
+geom_density(size = 1, alpha = 0.3) +
+ggtitle( "Training Set's Predicted Score" ) + 
+  xlab("Probability of Funded")+
+  scale_color_economist( name = "Project Status", labels = c( "Expired", "Funded" ) ) +
+  theme_update(# axis labels
+             axis.title = element_text(size = 14),
+             # tick labels
+             axis.text = element_text(size = 14),
+             # title 
+             title = element_text(size = 16))+
+theme_economist()
+```
+
+
+
+
+
+```{r}
+library(ROCR)
+library(grid)
+library(gridExtra)
+library(data.table)
+library(dplyr)
+library(ggplot2)
+library(scales)
+
+```
+
+
+
+
+```{r}
+cm_info <- ConfusionMatrixInfo(data = data_train, predict = "predictions", actual = "binary", cutoff = 0.50)
+
+```
+
+```{r}
+cost_fp <- 100
+cost_fn <- 200
+roc_info <- ROCInfo( data = cm_info$data, predict = "predict", 
+                     actual = "actual", cost.fp = cost_fp, cost.fn = cost_fn )
+grid.draw(roc_info$plot)
+```
+
+
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+```{r}
+AccuracyCutoffInfo <- function( train, test, predict, actual )
+{
+	# change the cutoff value's range as you please 
+	cutoff <- seq( .4, .8, by = .05 )
+
+	accuracy <- lapply( cutoff, function(c)
+	{
+		# use the confusionMatrix from the caret package
+		cm_train <- confusionMatrix( as.numeric( train[[predict]] > c ), train[[actual]] )
+		cm_test  <- confusionMatrix( as.numeric( test[[predict]]  > c ), test[[actual]]  )
+			
+		dt <- data.table( cutoff = c,
+						  train  = cm_train$overall[["Accuracy"]],
+		 			      test   = cm_test$overall[["Accuracy"]] )
+		return(dt)
+	}) %>% rbindlist()
+
+	# visualize the accuracy of the train and test set for different cutoff value 
+	# accuracy in percentage.
+	accuracy_long <- gather( accuracy, "data", "accuracy", -1 )
+	
+	plot <- ggplot( accuracy_long, aes( cutoff, accuracy, group = data, color = data ) ) + 
+			geom_line( size = 1 ) + geom_point( size = 3 ) +
+			scale_y_continuous( label = percent ) +
+			ggtitle( "Train/Test Accuracy for Different Cutoff" )
+
+	return( list( data = accuracy, plot = plot ) )
+}
+
+ConfusionMatrixInfo <- function( data, predict, actual, cutoff )
+{	
+	# extract the column ;
+	# relevel making 1 appears on the more commonly seen position in 
+	# a two by two confusion matrix	
+	predict <- data[[predict]]
+	actual  <- relevel( as.factor( data[[actual]] ), "1" )
+	
+	result <- data.table( actual = actual, predict = predict )
+
+	# caculating each pred falls into which category for the confusion matrix
+	result[ , type := ifelse( predict >= cutoff & actual == 1, "TP",
+					  ifelse( predict >= cutoff & actual == 0, "FP", 
+					  ifelse( predict <  cutoff & actual == 1, "FN", "TN" ) ) ) %>% as.factor() ]
+
+	# jittering : can spread the points along the x axis 
+	plot <- ggplot( result, aes( actual, predict, color = type ) ) + 
+			geom_violin( fill = "white", color = NA ) +
+			geom_jitter(shape = 1, alpha = 0.6 ) + 
+			geom_hline( yintercept = cutoff, color = "blue", alpha = 0.6 ) + 
+			scale_y_continuous( limits = c( 0, 1 ) ) + 
+			scale_color_discrete( breaks = c( "TP", "FN", "FP", "TN" ) ) + # ordering of the legend 
+			guides( col = guide_legend( nrow = 2 ) ) + # adjust the legend to have two rows  
+			ggtitle( sprintf( "Confusion Matrix with Cutoff at %.2f", cutoff ) )
+
+	return( list( data = result, plot = plot ) )
+}
+
+ROCInfo <- function( data, predict, actual, cost.fp, cost.fn )
+{
+	# calculate the values using the ROCR library
+	# true positive, false postive 
+	pred <- prediction( data[[predict]], data[[actual]] )
+	perf <- performance( pred, "tpr", "fpr" )
+	roc_dt <- data.frame( fpr = perf@x.values[[1]], tpr = perf@y.values[[1]] )
+
+	# cost with the specified false positive and false negative cost 
+	# false postive rate * number of negative instances * false positive cost + 
+	# false negative rate * number of positive instances * false negative cost
+	cost <- perf@x.values[[1]] * cost.fp * sum( data[[actual]] == 0 ) + 
+			( 1 - perf@y.values[[1]] ) * cost.fn * sum( data[[actual]] == 1 )
+
+	cost_dt <- data.frame( cutoff = pred@cutoffs[[1]], cost = cost )
+
+	# optimal cutoff value, and the corresponding true positive and false positive rate
+	best_index  <- which.min(cost)
+	best_cost   <- cost_dt[ best_index, "cost" ]
+	best_tpr    <- roc_dt[ best_index, "tpr" ]
+	best_fpr    <- roc_dt[ best_index, "fpr" ]
+	best_cutoff <- pred@cutoffs[[1]][ best_index ]
+	
+	# area under the curve
+	auc <- performance( pred, "auc" )@y.values[[1]]
+
+	# normalize the cost to assign colors to 1
+	normalize <- function(v) ( v - min(v) ) / diff( range(v) )
+	
+	# create color from a palette to assign to the 100 generated threshold between 0 ~ 1
+	# then normalize each cost and assign colors to it, the higher the blacker
+	# don't times it by 100, there will be 0 in the vector
+	col_ramp <- colorRampPalette( c( "green", "orange", "red", "black" ) )(100)   
+	col_by_cost <- col_ramp[ ceiling( normalize(cost) * 99 ) + 1 ]
+
+	roc_plot <- ggplot( roc_dt, aes( fpr, tpr ) ) + 
+				geom_line( color = rgb( 0, 0, 1, alpha = 0.3 ) ) +
+				geom_point( color = col_by_cost, size = 4, alpha = 0.2 ) + 
+				geom_segment( aes( x = 0, y = 0, xend = 1, yend = 1 ), alpha = 0.8, color = "royalblue" ) + 
+				labs( title = "ROC", x = "False Postive Rate", y = "True Positive Rate" ) +
+				geom_hline( yintercept = best_tpr, alpha = 0.8, linetype = "dashed", color = "steelblue4" ) +
+				geom_vline( xintercept = best_fpr, alpha = 0.8, linetype = "dashed", color = "steelblue4" )				
+
+	cost_plot <- ggplot( cost_dt, aes( cutoff, cost ) ) +
+				 geom_line( color = "blue", alpha = 0.5 ) +
+				 geom_point( color = col_by_cost, size = 4, alpha = 0.5 ) +
+				 ggtitle( "Cost" ) +
+				 scale_y_continuous( labels = comma ) +
+				 geom_vline( xintercept = best_cutoff, alpha = 0.8, linetype = "dashed", color = "steelblue4" )	
+
+	# the main title for the two arranged plot
+	sub_title <- sprintf( "Cutoff at %.2f - Total Cost = %f, AUC = %.3f", 
+						  best_cutoff, best_cost, auc )
+	
+	# arranged into a side by side plot
+	plot <- arrangeGrob( roc_plot, cost_plot, ncol = 2, 
+						 top = textGrob( sub_title, gp = gpar( fontsize = 16, fontface = "bold" ) ) )
+	
+	return( list( plot 		  = plot, 
+				  cutoff 	  = best_cutoff, 
+				  totalcost   = best_cost, 
+				  auc         = auc,
+				  sensitivity = best_tpr, 
+				  specificity = 1 - best_fpr ) )
+}
+
+```
+
+
+
+
+
