@@ -1,0 +1,334 @@
+---
+title: "TIME SERIES MODEL"
+output: html_notebook
+---
+
+SAVED FOR POSTERITY
+package 'readr' was built under R version 3.4.4 
+> Projects <- read_csv("C:/Users/acros/Documents/Math 189/Datasets/Projects.csv", 
++     col_types = cols(`Project Essay` = col_skip(), 
++         `Project ID` = col_skip(), `Project Need Statement` = col_skip(), 
++         `Project Short Description` = col_skip(), 
++         `Project Title` = col_skip(), `School ID` = col_skip(), 
++         `Teacher ID` = col_skip()))
+
+
+
+ADD IN THE EXPIRATION DATE OF THE PROJECT TO OUR PROJECTDF FILE. The following code cleans up a lot of stuff and makes it so that when we add the date to the file, it approximately matches.
+
+
+```{r}
+summary(Projects)
+```
+
+```{r}
+names(Projects) <- c("TeacherProjSeq", "ProjectType", "ProjectSubject", "ProjectSubCat", "ProjectGrade", "ProjectResource", "ProjectCost", "ProjectStartDate", "ProjectExpDate", "ProjectStatus", "ProjectFundedDate" )
+summary(Projects)
+```
+
+
+```{r}
+projectdf2 <- subset(Projects, ProjectStatus != "Live")
+projectdf3 <- subset(projectdf2, ProjectResource != "NA")
+projectdf$ProjectExpDate <- projectdf3$ProjectExpDate
+```
+
+```{r}
+projectdf$FundedDate <- projectdf3$ProjectFundedDate
+```
+
+
+NOW ATTEMPT TO TIME SERIES MODEL
+```{r}
+library(ggplot2)
+library(tseries)
+library(forecast)
+```
+
+THIS GIVES US A CUMULATIVE SUM OF FUNDED PROJECTS
+```{r}
+projectdf$CumulativeFunded <- cumsum(projectdf$status)
+projectdf$MonthlyMovingAverage <- ma(projectdf$status, order = 30)
+```
+
+
+WE ATTEMPT TO MODEL DONATION AMOUNT AND FREQUENCY, AND POSSIBLY UNIQUE DONATIONS
+```{r}
+names(Donations) <- c("Donation.ID", "Donor.ID", "Optional.Donation", "Donation.Amount", "Cart.Sequence", "Donation.Recieved.Date")
+```
+
+
+```{r}
+isodate <- function (x = Sys.Date()) {
+  xday <- ISOdate(year(x), month(x), day(x), tz = tz(x))
+  dn <- 1 + (wday(x) + 5)%%7
+  nth <- xday + ddays(4 - dn)
+  jan1 <- ISOdate(year(nth), 1, 1, tz = tz(x))
+  return(sprintf("%s/%02d", format(nth, "%y"), 1 + (nth - jan1)%/%ddays(7)))
+}
+```
+
+
+REMOVES THE TIME ELEMENT FROM THE DATE
+```{r}
+library(lubridate)
+library(zoo)
+Donations$Recieve.Date <- as.Date(Donations$Donation.Recieved.Date)
+Donations$MonthYear <- format(as.Date(Donations$Recieve.Date), "%Y-%m")
+Donations$WeekYear <- isodate(Donations$Recieve.Date)
+
+```
+
+
+
+
+```{r}
+DonateAmounts <- aggregate(Donation.Amount~Recieve.Date, Donations, sum)
+DonateAmounts$Weekly.Moving.Average <- ma(DonateAmounts$Donation.Amount, order = 7)
+DonateAmounts$Monthly.Moving.Average <- ma(DonateAmounts$Donation.Amount, order = 30)
+```
+
+```{r}
+DonateWeekly <- aggregate(Donation.Amount~WeekYear, Donations, sum)
+```
+
+
+```{r}
+
+uniquetimeseries <- ts(UniqueVisit[(12:291),]$UniqueCount, frequency = 52, start = c(2013,1), end = c(2018, 19))
+autoplot(uniquetimeseries, ts.colour = "Blue")+
+  geom_line(color = "#00AFBB", size = .75, aes(colour=id))+
+  xlab("Time")+
+  geom_smooth(color = "red", se = FALSE)+
+  ylab("Number of Unique Donors/Week")+
+  ggtitle("Time Series of Unique Donors")+
+  theme_bw()+
+  theme(text = element_text(size = 16))
+  
+```
+
+
+```{r}
+DonateCount$Weekly.Moving.Average <- ma(DonateCount$Count, order = 7)
+DonateCount$Monthly.Moving.Average <- ma(DonateCount$Count, order = 30)
+```
+
+
+
+```{r}
+traints <- window(UniquevisitTS, start = c(2013,1), end = c(2018,1))
+testts <- window(UniquevisitTS, start=c(2018,2), end = c(2018,19))
+
+```
+
+```{r}
+testingforecast <- forecast(traints)
+accuracy(testingforecast, testts)
+```
+
+```{r}
+arimatest <- auto.arima(traints)
+arimafcast <- forecast(arimatest)
+accuracy(arimafcast, testts)
+```
+
+
+```{r}
+summary(arimatest)
+summary(testingforecast)
+```
+
+
+
+This forecast method uses STL + ETS(A,Ad,N)
+```{r}
+library(ggplot2)
+library(tseries)
+library(forecast)
+library(ggfortify)
+
+etsmodel <- tbats(UniquevisitTS)
+etsforecast <- forecast(etsmodel)
+autoplot(etsforecast, geom = "line", ts.colour = ("dodgerblue3"), predict.colour = "black", conf.int.fill = "red")+
+  xlab("Time")+
+  ylab("Number of Unique Donors/Week")+
+  ggtitle("Unique Donors Forecast")+
+  theme(text = element_text(size = 16))
+```
+
+
+
+```{r}
+autoplot(stl(UniquevisitTS, s.window = "periodic"))+
+  geom_line( size = .75, color = "#00AFBB",)+
+  theme_bw()+
+  theme(text = element_text(size = 16))
+```
+
+
+
+
+```{r}
+
+library(ggplot2)
+library(tseries)
+library(forecast)
+uniqueforecast <- forecast(UniquevisitTS, level = 95, h = (52 + (52-19)))
+
+library(ggfortify)
+
+autoplot(uniqueforecast, geom = "line", ts.colour = ("dodgerblue3"), predict.colour = "black", conf.int.fill = "red")+
+  xlab("Time")+
+  geom_smooth()+
+  ylab("Number of Unique Donors/Week")+
+  ggtitle("Unique Donors Forecast")+
+  theme_bw()+
+  theme(text = element_text(size = 16))
+
+```
+
+```{r}
+autoplot(resid(uniqueforecast))+
+  geom_line(color = "red", size = 0.70)+
+  geom_hline(aes(yintercept = 0))+
+   xlab("Time")+
+  ylab("Residuals of STL+ETS(A,Ad,N)")+
+  ggtitle("Residual Plot")+
+  theme_bw()+
+  theme(text = element_text(size = 14))
+```
+
+
+
+```{r}
+library(MASS)
+ggplot(UniqueVisit, aes(x = UniqueCount, y = Donation.Amount))+
+  geom_point(shape = 1, color = "Blue")+
+  stat_smooth(method = "glm", formula = y ~ x, fill = "Red", color = "Black")+
+  theme_bw()+
+  xlab("Unique Donors per Week")+
+  ylab("Money Donated/Week")+
+  scale_y_continuous(labels = comma) +
+  ggtitle("Relationship Between Donors and Donations")+
+  theme(text = element_text(size = 14))
+```
+
+
+```{r}
+library(broom)
+mod <- lm(Donation.Amount ~ UniqueCount, data = UniqueVisit)
+df <- augment(mod)
+ggplot(df, aes(x = .fitted, y = .resid)) + geom_point()
+```
+
+
+
+
+
+GGPLOT TIME SERIES OF THE DONATION AMOUNT, WEEKLY MOVING AVERAGE AND MONTHLY MOVING AVERAGE
+```{r}
+library(ggfortify)
+library(forecast)
+donationforecast <- forecast(donationtimeseries)
+autoplot(donationforecast, geom = "line", ts.colour = ("dodgerblue3"),
+         predict.color = "black", conf.int.fill = "red")+
+  xlab("Time")+
+  ylab("Donation Amount/Week")+
+  ggtitle("Forecast of Donation Amount per Week")+
+  theme(text = element_text(size=18))
+summary(donationforecast)
+```
+
+
+OKAY NOW TO ACTUALLY DO SOME TIME SERIES STUFF. THE FOLLOWING DESEASONALIZES THE TIME SERIES MODEL
+```{r}
+donation2013.2018 <- DonateAmounts[(34:1985),]
+count.ma <- ts(na.omit(donation2013.2018$Weekly.Moving.Average), frequency = 30)
+decomp <- stl(count.ma, s.window = "periodic")
+deseasonal.cnt <- seasadj(decomp)
+plot(decomp)
+```
+
+
+We perform the augmented Dickey-Fuller Test to see if our time series data is stationary or not. Note that the alternative is that the series is stationary, and the null is that it is non-stationary. The test rejects with a p-value of 0.01 on the regular data and the deseasonalized data, and so the data is stationary. We can proceed with the model. Taking the difference of the data, we see that the data oscillates around 0 with no strong trend, which impies that a difference of order 1 is sufficient and should be included in the model.
+```{r}
+adf.test(count.ma, alternative = "stationary")
+adf.test(deseasonal.cnt, alternative = "stationary")
+count.d1 = diff(deseasonal_cnt, differences = 1)
+plot(count.d1)
+```
+
+
+This plots some stuff about lags. It's hard to say exactlly what this means at the moment.
+```{r}
+Acf(count.d1, main='ACF for Differenced Series')
+Pacf(count.d1, main='PACF for Differenced Series')
+```
+
+
+We now fit an ARIMA Model
+
+
+We look at the residuals of the current model. Note that the "autocorrelation" spikes on the 7th lag, or something. This indicates that we should put p = 7 for our model.
+```{r}
+unique.arima<-auto.arima(UniquevisitTS)
+summary(unique.arima)
+tsdisplay(residuals(unique.arima), lag.max=45, main = "Model Residuals")
+```
+
+
+NAIVE MODEL RESULT
+```{r}
+library(scales)
+fcast <- forecast(unique.arima, h=52)
+plot(fcast)
+
+autoplot(fcast, geom = "line", ts.colour = ("dodgerblue3"),
+         predict.color = "black", conf.int.fill = "red")+
+  xlab("Time")+
+  ylab("Unique Donors/Week")+
+  ggtitle("Forecast of Unique Donors per Week")+
+  theme(text = element_text(size=18))
+```
+
+
+
+HERE WE WILL ATTEMPT TO REDO THE TIME SERIES IN A MORE PRECISE WAY
+
+
+First make the time series object, We have 365.25 observations per year, and we start in 2013. In order to smooth the data, we use the weekly moving average.
+```{r}
+donationtimeseries <- ts(DonateWeekly[(12:291),]$Donation.Amount, frequency = 52, start = c(2013, 1), c(2018, 19))
+plot(donationtimeseries)
+additivedecomposedts <- decompose(donationtimeseries)
+plot(additivedecomposedts)
+multidecomposedts <- decompose(donationtimeseries, type = "multiplicative")
+plot(multidecomposedts)
+```
+
+
+
+Now we will decompose with STL which stands for "seasonal times series by loess". Note the trendline and the super sharp seasonality.
+```{r}
+donation.stl <- stl(donationtimeseries, t.window = 15, s.window="periodic", robust=TRUE)
+plot(donation.stl)
+```
+
+```{r}
+library(forecast)
+donation.arima <- auto.arima(donationtimeseries)
+summary(donation.arima)
+tsdisplay(residuals(donation.arima), main = "Donation Model Residuals")
+donationarimafcast <- forecast(donation.arima, h = 52)
+
+autoplot(donationarimafcast, geom = "line", ts.colour = ("dodgerblue3"),
+         predict.color = "black", conf.int.fill = "red")+
+  xlab("Time")+
+  ylab("Donation Amount/Week")+
+  ggtitle("Forecast of Donation Amount per Week")+
+  theme(text = element_text(size=18))
+```
+
+
+
+HERE WE WILL VALIDATE THE TWO FORECAST METHODS, SHOULD BE FAST
