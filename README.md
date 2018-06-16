@@ -1,7 +1,7 @@
 GitHub repo for MATH 189 Final Project
 
 Teammates:
-Nathan
+Nathan Liittschwager A14274630
 Arielle Thibeault A13372654
 Alex Liebscher A13451848
 Mike Ona A11260418
